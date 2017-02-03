@@ -44,6 +44,7 @@ Media.EVENT_STATE = 'STATE';
 Media.EVENT_DURATION = 'DURATION';
 Media.EVENT_POSITION = 'POSITION';
 Media.EVENT_BUFFERINGPROGRESS = 'BUFFERINGPROGRESS';
+Media.EVENT_SUBTITLE = 'SUBTITLE';
 Media.EVENT_ENDED = 'ENDED';
 
 //Media.MEDIA_SUBTITLE = 5;
@@ -63,14 +64,12 @@ Media.mediaEvent = function(id, value) {
     if(media) {
         switch(value.type) {
         case Media.EVENT_STATE :
-            setTimeout(function() {
-                if(media._mediaEventCallBack.onevent && value.data.oldState === null) {
-                    media._mediaEventCallBack.onevent(value);
-                }
-                else if(media._mediaEventCallBack.onevent && value.data.oldState !== value.data.state) {
-                    media._mediaEventCallBack.onevent(value);
-                }
-            },0);
+            if(media._mediaEventCallBack.onevent && value.data.oldState === null) {
+                media._mediaEventCallBack.onevent(value);
+            }
+            else if(media._mediaEventCallBack.onevent && value.data.oldState !== value.data.state) {
+                media._mediaEventCallBack.onevent(value);
+            }
             break;
         case Media.EVENT_DURATION :
             media._duration = value.data.duration;
@@ -83,6 +82,9 @@ Media.mediaEvent = function(id, value) {
         case Media.EVENT_BUFFERINGPROGRESS :
             media._mediaEventCallBack.onevent && media._mediaEventCallBack.onevent(value);
             break;
+        case Media.EVENT_SUBTITLE :
+            media._mediaEventCallBack.onevent && media._mediaEventCallBack.onevent(value);
+            break;
         case Media.EVENT_ENDED :
             media.stop();
             media._mediaEventCallBack.onevent && media._mediaEventCallBack.onevent(value);
@@ -91,9 +93,7 @@ Media.mediaEvent = function(id, value) {
             media._containerElem = value.data.containerElem;
             break;
         case Media._MEDIA_ERROR :
-            setTimeout(function() {
-                media._mediaEventCallBack.onerror && media._mediaEventCallBack.onerror(value);
-            },0);
+            media._mediaEventCallBack.onerror && media._mediaEventCallBack.onerror(value);
             break;
         default :
             console.log('Unhandled Media.mediaEvent :: ' + value.type);
@@ -137,7 +137,9 @@ Media.prototype.play = function() {
 };
 
 Media.prototype.stop = function() {
-    var me = this;
+    var me = this,
+        media = mediaObjects[this.id];
+    media.resetPlugin();
     exec(function() {
         me._position = 0;
         me._duration = -1;
@@ -145,6 +147,7 @@ Media.prototype.stop = function() {
 };
 
 Media.prototype.seekTo = function(milliseconds) {
+    argscheck.checkArgs('n', 'Media.seekTo', arguments);
     var me = this;
     exec(function(p) {
         me._position = p;
@@ -219,6 +222,28 @@ Media.prototype.syncVideoRect = function() {
         me._position = p;
     }, null, 'toast.Media', 'syncVideoRect');
 };
+
+Media.prototype.setSubtitlePath = function(path) {
+    argscheck.checkArgs('s', 'Media.setSubtitlePath', arguments);
+    exec(null, null, 'toast.Media', 'setSubtitlePath',[this.id,path]);
+};
+
+Media.prototype.getSubtitleLanguageList = function(successCallback, errorCallback) {
+    argscheck.checkArgs('fF', 'Media.getSubtitleLanguageList', arguments);
+    errorCallback = errorCallback || function () {};
+    exec(successCallback, errorCallback, 'toast.Media', 'getSubtitleLanguageList',[this.id]);
+};
+
+Media.prototype.setSubtitleLanguage = function(language) {
+    argscheck.checkArgs('s', 'Media.setSubtitleLanguage', arguments);
+    exec(null, null, 'toast.Media', 'setSubtitleLanguage',[this.id,language]);
+};
+
+Media.prototype.setSubtitleSync = function(milliseconds) {
+    argscheck.checkArgs('n', 'Media.setSubtitleSync', arguments);
+    exec(null, null, 'toast.Media', 'setSubtitleSync',[this.id,milliseconds]);
+};
+
 function invokeHooks (hook, args) {
     var media = args[0];
     args = args.slice(1);

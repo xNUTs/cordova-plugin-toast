@@ -28,6 +28,8 @@ var avplayState = {
     PAUSED: 'PAUSED'
 };
 var containerElem = null;
+var subtitleUrl = null;
+var subtitleLanguageObj = null;
 
 function createVideoContainer(id) {
     function setContainerStyleEventListener(elem,callback) {
@@ -62,7 +64,7 @@ function createVideoContainer(id) {
     containerElem.style.width = '0px';
     containerElem.style.height = '0px';
     containerElem.innerHTML = '<OBJECT type="application/avplayer" style="width:0px; height:0px;"></OBJECT>';
-    Media.mediaEvent(id,getMediaEventVaule(Media._MEDIA_CONTAINER,containerElem));
+    Media.mediaEvent(id,getMediaEventValue(Media._MEDIA_CONTAINER,containerElem));
 
     if(window.MutationObserver) {
         setContainerStyleEventListener(containerElem,containerStyleEventCallback);
@@ -119,11 +121,25 @@ function containerAppendEventCallback(MutationRecordProperty) {
 }
 
 function setAvplayVideoRect(rect) {
+    var avplayBaseWidth = 1920; // Base resolution of avplay
+    var ratio = avplayBaseWidth / window.document.documentElement.clientWidth; // Calculate ratio as base resolution
+    var videoRect = {};
+
+    if(rect && (rect.left < 0 || rect.top < 0 || rect.width < 0 || rect.height < 0)) {
+        console.log('[Warning] Rect size value is RangeError');
+        return;
+    }
+
     if(rect && (rect.left > 0 || rect.top > 0 || rect.width > 0 || rect.height > 0)) {
         try {
+            videoRect.left = rect.left * ratio; // Convert rect as base resolution
+            videoRect.top = rect.top * ratio;
+            videoRect.width = rect.width * ratio;
+            videoRect.height = rect.height * ratio;
+
             var state = webapis.avplay.getState();
             if(state == avplayState.IDLE || state == avplayState.PAUSED || state == avplayState.PLAYING || state ==avplayState.READY) {
-                webapis.avplay.setDisplayRect(Math.ceil(Number(rect.left)),Math.ceil(Number(rect.top)),Math.ceil(Number(rect.width)),Math.ceil(Number(rect.height)));
+                webapis.avplay.setDisplayRect(Math.ceil(Number(videoRect.left)),Math.ceil(Number(videoRect.top)),Math.ceil(Number(videoRect.width)),Math.ceil(Number(videoRect.height)));
             }
         }
         catch (e) {
@@ -136,7 +152,7 @@ function setAvplayVideoRect(rect) {
 }
 
 var currentMediaState = null;
-function getMediaEventVaule (type,data) {
+function getMediaEventValue (type,data) {
     var reval = {};
     switch(type) {
     case Media.EVENT_STATE :
@@ -170,6 +186,14 @@ function getMediaEventVaule (type,data) {
             'type': type,
             'data': {
                 'bufferingPercentage': data
+            }
+        };
+        break;
+    case Media.EVENT_SUBTITLE :
+        reval = {
+            'type': type,
+            'data': {
+                'text': data
             }
         };
         break;
@@ -226,8 +250,6 @@ function setScreenSaver(state) {
     }
 }
 
-var bBlockTimeUpdate = false;
-
 module.exports = {
     create: function(successCallback, errorCallback, args) {
         var id = args[0];
@@ -253,8 +275,7 @@ module.exports = {
 
         if(state !== avplayState.NONE && state !== avplayState.IDLE) {
             webapis.avplay.stop();
-            Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_STATE, Media.STATE_IDLE));
-            bBlockTimeUpdate = false;
+            Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_IDLE));
         }
 
         if(window.webapis) {
@@ -263,49 +284,51 @@ module.exports = {
             webapis.avplay.setListener({
                 onbufferingstart: function() {
                     console.log('media::onStalled()');
-                    bBlockTimeUpdate = true;
-                    Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_STATE,Media.STATE_STALLED));
+                    Media.mediaEvent(id,getMediaEventValue(Media.EVENT_STATE,Media.STATE_STALLED));
                 },
                 onbufferingprogress: function(percent) {
+                    if(currentMediaState !== Media.STATE_STALLED) {
+                        Media.mediaEvent(id,getMediaEventValue(Media.EVENT_STATE,Media.STATE_STALLED));
+                    }
                     console.log('media::Buffering progress data: ' + percent);
-                    Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_BUFFERINGPROGRESS,percent));
+                    Media.mediaEvent(id,getMediaEventValue(Media.EVENT_BUFFERINGPROGRESS,percent));
                 },
                 onbufferingcomplete: function() {
                     console.log('media::Buffering complete.');
-                    bBlockTimeUpdate = false;
                     state = webapis.avplay.getState();
                     if(state !== 'READY') {
-                        Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_STATE,state));
+                        Media.mediaEvent(id,getMediaEventValue(Media.EVENT_STATE,state));
                     }
-                    Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_POSITION,webapis.avplay.getCurrentTime()));
+                    Media.mediaEvent(id,getMediaEventValue(Media.EVENT_POSITION,webapis.avplay.getCurrentTime()));
                 },
                 onstreamcompleted: function(currentTime) {
                     console.log('media::ended()');
-                    Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_ENDED));
+                    Media.mediaEvent(id, getMediaEventValue(Media.EVENT_ENDED));
                 },
                 oncurrentplaytime: function(currentTime) {
-                    state = webapis.avplay.getState();
-                    if(!bBlockTimeUpdate && (state == avplayState.PLAYING || state == avplayState.PAUSED)) {
-                        console.log('media::Current playtime: ' + currentTime);
-                        Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_POSITION,currentTime));
+                    if(currentMediaState !== Media.STATE_PLAYING && currentTime > 0) {
+                        Media.mediaEvent(id,getMediaEventValue(Media.EVENT_STATE,Media.STATE_PLAYING));
                     }
+                    console.log('media::Current playtime: ' + currentTime);
+                    Media.mediaEvent(id,getMediaEventValue(Media.EVENT_POSITION,currentTime));
                 },
                 onevent: function(eventType, eventData) {
                     console.log('media::Event type error: ' + eventType + ', eventData: ' + eventData);
                 },
                 onerror: function(errorData) {
                     console.log('media::Event type error: ' + errorData);
-                    Media.mediaEvent(id,getMediaEventVaule(Media._MEDIA_ERROR,errorData));
+                    Media.mediaEvent(id,getMediaEventValue(Media._MEDIA_ERROR,errorData));
                 },
                 onsubtitlechange: function(duration, text, data1, data2) {
                     console.log('media::Subtitle Changed.');
+                    Media.mediaEvent(id,getMediaEventValue(Media.EVENT_SUBTITLE,text));
                 },
                 ondrmevent: function(drmEvent, drmData) {
                     console.log('media::DRM callback: ' + drmEvent + ', data: ' + drmData);
                 }
             });
             currentMediaState = Media.STATE_IDLE;
-            Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_STATE, Media.STATE_IDLE));
+            Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_IDLE));
         }
     },
 
@@ -315,27 +338,71 @@ module.exports = {
 
         console.log('media::play() - id =' + id);
         if(webapis.avplay.getState() == avplayState.IDLE) {
-            webapis.avplay.prepare();
-            webapis.avplay.play();
-            var duration = webapis.avplay.getDuration();
-            console.log('media:: duration = '+duration);
-            Media.mediaEvent(id,getMediaEventVaule(Media.EVENT_DURATION,duration));
+            if(subtitleUrl) {
+                var download = new tizen.DownloadRequest(subtitleUrl, 'wgt-private-tmp');
+                tizen.download.start(download, {
+                    oncompleted: function(downloadId, fullPath) {
+                        console.log('fullPath...............'+fullPath);
+                        webapis.avplay.setExternalSubtitlePath(fullPath);
+                        playMedia();
+                    },
+                    onfailed: function (error) {
+                        console.log('[Warning] Failed to download Subtitle');
+                        playMedia();
+                    }
+                });
+            }
+            else {
+                playMedia();
+            }
         }
         else {
             webapis.avplay.play();
-            Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_STATE, Media.STATE_PLAYING));
+            setScreenSaver('off');
+            Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_PLAYING));
         }
-        setScreenSaver('off');
+
+        function playMedia() {
+            webapis.avplay.prepareAsync(function() {
+                webapis.avplay.play();
+                setScreenSaver('off');
+                var totalTrackInfo = webapis.avplay.getTotalTrackInfo();
+                subtitleLanguageObj = {};
+                for(var i=0; i < totalTrackInfo.length; i++) {
+                    if(totalTrackInfo[i].type == 'TEXT') {
+                        //Tizen webapis.avplay.getTotalTrackInfo return the value does not follow camelcase rule.
+                        //Jshint camelcase and jscs requireCamelCaseOrUpperCaseIdentifiers are temporarily disabled. because It is a spec of webapis avplay.getTotalTrackInfo.
+
+                        /*jshint camelcase: false */
+                        /*jscs:disable requireCamelCaseOrUpperCaseIdentifiers*/
+                        var extraInfo = JSON.parse(totalTrackInfo[i].extra_info);
+                        if(extraInfo && extraInfo.hasOwnProperty('track_lang')) {
+                            console.log('extraInfo.track_lang...............'+extraInfo.track_lang);
+                            if(extraInfo.track_lang !== '') {
+                                subtitleLanguageObj[extraInfo.track_lang] = totalTrackInfo[i].index;
+                            }
+                        }
+                        /*jshint camelcase: true */
+                        /*jscs:enable requireCamelCaseOrUpperCaseIdentifiers*/
+                    }
+                }
+                Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_PLAYING));
+                var duration = webapis.avplay.getDuration();
+                console.log('media:: duration = '+duration);
+                Media.mediaEvent(id,getMediaEventValue(Media.EVENT_DURATION,duration));
+            });
+        }
     },
 
     // Stops the playing media
     stop: function(successCallback, errorCallback, args) {
         var id = args[0];
         console.log('media::stop() - EVENT_STATE -> IDLE');
+        subtitleUrl = null;
         webapis.avplay.stop();
-        Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_STATE, Media.STATE_IDLE));
+        webapis.avplay.close();
+        Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_IDLE));
         successCallback();
-        bBlockTimeUpdate = false;
         setScreenSaver('on');
     },
 
@@ -350,16 +417,14 @@ module.exports = {
         },function(e) {
             throw Error('Failed to seekTo');
         });
-        bBlockTimeUpdate = true;
     },
 
     // Pauses the playing media
     pause: function(successCallback, errorCallback, args) {
         var id = args[0];
         console.log('media::pause() - EVENT_STATE -> PAUSED');
-
         webapis.avplay.pause();
-        Media.mediaEvent(id, getMediaEventVaule(Media.EVENT_STATE, Media.STATE_PAUSED));
+        Media.mediaEvent(id, getMediaEventValue(Media.EVENT_STATE, Media.STATE_PAUSED));
         setScreenSaver('on');
     },
 
@@ -370,9 +435,67 @@ module.exports = {
     },
 
     setDrm: function(successCallback, errorCallback, args) {
-        console.log('media::setStreamingProperty() - type= '+args[0]);
+        console.log('media::setDrm() - type= '+args[0]);
 
         webapis.avplay.setDrm.apply(webapis.avplay, args);
+    },
+
+    setSubtitlePath: function(successCallback, errorCallback, args) {
+        console.log('media::setSubtitlePath()');
+        var path = args[1],
+            absoluteUrl = Urlutil.makeAbsolute(args[1]);
+
+        if(path && typeof path == 'string') {
+            if(!Util.isRemoteUrl(absoluteUrl)) {
+                webapis.avplay.setExternalSubtitlePath(absoluteUrl.replace(/^file:\/\//,''));
+            }
+            else {
+                subtitleUrl = absoluteUrl;
+            }
+
+        }
+        else {
+            console.log('[Warning] Subtitle path is not valid.');
+        }
+    },
+
+    getSubtitleLanguageList: function(successCallback, errorCallback, args) {
+        console.log('media::getSubtitleLanguageList()');
+        var subtitleLanguageArr = [];
+
+        if(subtitleLanguageObj) {
+            for(var key in subtitleLanguageObj) {
+                subtitleLanguageArr.push(key);
+            }
+        }
+
+        if(subtitleLanguageArr.length !== 0 ) {
+            setTimeout(function() {
+                successCallback(subtitleLanguageArr);
+            },0);
+        }
+        else {
+            subtitleLanguageArr = null;
+            errorCallback(new Error('Fail to get subtitle language information'));
+        }
+    },
+
+    setSubtitleLanguage: function(successCallback, errorCallback, args) {
+        console.log('media::setSubtitleLanguage()');
+        var lang = args[1].toLowerCase();
+
+        if(subtitleLanguageObj.hasOwnProperty(lang)) {
+            webapis.avplay.setSelectTrack('TEXT',subtitleLanguageObj.lang);
+        }
+        else {
+            throw new Error('Subtitle is not support this language.');
+        }
+    },
+
+    setSubtitleSync: function(successCallback, errorCallback, args) {
+        console.log('media::setSubtitleSync()');
+        var milliseconds = args[1];
+        webapis.avplay.setSubtitlePosition(milliseconds);
     }
 };
 
